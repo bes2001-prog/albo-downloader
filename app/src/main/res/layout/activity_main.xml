@@ -61,7 +61,7 @@
                 android:inputType="textUri" />
         </LinearLayout>
 
-        <!-- URL input -->
+        <!-- URL input with Paste and X clear button -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -82,6 +82,19 @@
                 android:inputType="textUri"
                 android:imeOptions="actionDone"
                 android:maxLines="2" />
+
+            <!-- X clear button - only visible when URL is typed -->
+            <Button
+                android:id="@+id/clearBtn"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_gravity="center_vertical"
+                android:text="✕"
+                android:textColor="#666666"
+                android:textSize="14sp"
+                android:background="@android:color/transparent"
+                android:padding="0dp"
+                android:visibility="gone" />
 
             <Button
                 android:id="@+id/pasteBtn"
@@ -153,7 +166,7 @@
             android:max="100"
             android:visibility="gone" />
 
-        <!-- Menu panel - buttons shown/hidden dynamically per platform -->
+        <!-- Menu - buttons shown/hidden dynamically per platform -->
         <LinearLayout
             android:id="@+id/menuPanel"
             android:layout_width="match_parent"
@@ -161,7 +174,6 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <!-- Always shown -->
             <Button
                 android:id="@+id/btnVideo"
                 android:layout_width="match_parent"
@@ -182,6 +194,7 @@
                 android:textSize="15sp"
                 android:background="#1E1E1E" />
 
+            <!-- YouTube / Vimeo / Twitch only -->
             <Button
                 android:id="@+id/btnSubtitles"
                 android:layout_width="match_parent"
@@ -190,7 +203,8 @@
                 android:text="📝  Subtitles (SRT with timestamps)"
                 android:textColor="#FFFFFF"
                 android:textSize="15sp"
-                android:background="#1E1E1E" />
+                android:background="#1E1E1E"
+                android:visibility="gone" />
 
             <!-- YouTube only -->
             <Button
@@ -204,7 +218,7 @@
                 android:background="#1E1E1E"
                 android:visibility="gone" />
 
-            <!-- Instagram / TikTok / Pinterest only -->
+            <!-- Instagram / TikTok / Pinterest / Twitter only -->
             <Button
                 android:id="@+id/btnPhotos"
                 android:layout_width="match_parent"
@@ -230,12 +244,11 @@
 
         </LinearLayout>
 
-        <!-- Download another format (shown after each download) -->
+        <!-- Download another format -->
         <LinearLayout
             android:id="@+id/againPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
             android:visibility="gone">
 
             <Button
