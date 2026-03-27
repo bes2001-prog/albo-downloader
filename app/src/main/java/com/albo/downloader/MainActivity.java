@@ -1,14 +1,12 @@
 package com.albo.downloader;
 
 import android.app.Activity;
-import android.app.DownloadManager;
+import android.app.AlertDialog;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -21,6 +19,10 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,18 +34,23 @@ public class MainActivity extends Activity {
     private Button     pasteBtn, clearBtn, btnVideo, btnAudio,
                        btnSubtitles, btnTextOnly, btnPhotos, btnPlaylist, btnAgain;
     private ProgressBar progressBar;
-    private TextView   statusText, titleText, uploaderText, connectionText;
-    private LinearLayout menuPanel, settingsPanel, infoCard, againPanel;
+    private TextView   statusText, titleText, uploaderText, connectionText,
+                       folderText;
+    private LinearLayout menuPanel, settingsPanel, infoCard, againPanel, folderRow;
     private View       divider;
 
     private String  serverUrl;
     private String  currentUrl;
     private String  currentJobId;
-    private boolean isDownloading = false;
-    private boolean showSubtitles = false;
-    private boolean showTextOnly  = false;
-    private boolean showPhotos    = false;
-    private boolean showPlaylist  = false;
+    private String  selectedFolder = ""; // empty = server default
+    private boolean isDownloading  = false;
+    private boolean showSubtitles  = false;
+    private boolean showTextOnly   = false;
+    private boolean showPhotos     = false;
+    private boolean showPlaylist   = false;
+
+    // Folder map loaded from server: display name -> full path
+    private final Map<String, String> folderMap = new LinkedHashMap<>();
 
     private final Handler         handler  = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newCachedThreadPool();
@@ -53,15 +60,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        prefs     = getSharedPreferences("albo_dl", MODE_PRIVATE);
-        serverUrl = prefs.getString("server_url", DEFAULT_SERVER);
+        prefs         = getSharedPreferences("albo_dl", MODE_PRIVATE);
+        serverUrl     = prefs.getString("server_url", DEFAULT_SERVER);
+        selectedFolder= prefs.getString("save_folder", "");
         bindViews();
         setupListeners();
         checkConnection();
-
-        // Auto-paste URL from clipboard if it looks like a link
         autoCheckClipboard();
-
         handleShareIntent(getIntent());
     }
 
@@ -74,10 +79,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Re-check clipboard every time app comes to foreground
-        if (urlInput.getText().toString().isEmpty()) {
-            autoCheckClipboard();
-        }
+        if (urlInput.getText().toString().isEmpty()) autoCheckClipboard();
     }
 
     private void autoCheckClipboard() {
@@ -121,6 +123,8 @@ public class MainActivity extends Activity {
         titleText      = findViewById(R.id.titleText);
         uploaderText   = findViewById(R.id.uploaderText);
         connectionText = findViewById(R.id.connectionText);
+        folderText     = findViewById(R.id.folderText);
+        folderRow      = findViewById(R.id.folderRow);
         menuPanel      = findViewById(R.id.menuPanel);
         settingsPanel  = findViewById(R.id.settingsPanel);
         infoCard       = findViewById(R.id.infoCard);
@@ -135,13 +139,25 @@ public class MainActivity extends Activity {
         divider.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
         clearBtn.setVisibility(View.GONE);
+
+        updateFolderLabel();
+    }
+
+    private void updateFolderLabel() {
+        if (selectedFolder.isEmpty()) {
+            folderText.setText("📁 Save to: Default (Downloads/Albo Downloader)");
+        } else {
+            // Show just the last folder name
+            String name = selectedFolder.replace("\\", "/");
+            int last = name.lastIndexOf("/");
+            folderText.setText("📁 Save to: " + (last >= 0 ? name.substring(last + 1) : name));
+        }
     }
 
     private void setupListeners() {
-        // Show/hide X clear button based on whether field has text
         urlInput.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            public void onTextChanged(CharSequence s, int st, int b, int c) {
                 clearBtn.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
             }
             public void afterTextChanged(Editable s) {}
@@ -175,6 +191,9 @@ public class MainActivity extends Activity {
             return true;
         });
 
+        // Folder picker
+        folderRow.setOnClickListener(v -> showFolderPicker());
+
         btnVideo.setOnClickListener(v     -> startDownload("video"));
         btnAudio.setOnClickListener(v     -> startDownload("mp3"));
         btnSubtitles.setOnClickListener(v -> startDownload("subtitles"));
@@ -200,6 +219,42 @@ public class MainActivity extends Activity {
                     prefs.edit().putString("server_url", url).apply();
                     checkConnection();
                 }
+            }
+        });
+    }
+
+    private void showFolderPicker() {
+        executor.execute(() -> {
+            try {
+                HttpURLConnection conn = openConn(serverUrl + "/folders", "GET", null);
+                String resp = readResp(conn);
+                conn.disconnect();
+                JSONObject json = new JSONObject(resp);
+
+                // Build ordered map
+                folderMap.clear();
+                folderMap.put("Default (Downloads/Albo Downloader)", "");
+                Iterator<String> keys = json.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    folderMap.put(key, json.getString(key));
+                }
+
+                handler.post(() -> {
+                    ArrayList<String> names = new ArrayList<>(folderMap.keySet());
+                    new AlertDialog.Builder(this)
+                        .setTitle("Save to folder")
+                        .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                            String chosen = names.get(which);
+                            selectedFolder = folderMap.getOrDefault(chosen, "");
+                            prefs.edit().putString("save_folder", selectedFolder).apply();
+                            updateFolderLabel();
+                        })
+                        .show();
+                });
+
+            } catch (Exception e) {
+                handler.post(() -> toast("Could not load folders from PC"));
             }
         });
     }
@@ -233,7 +288,6 @@ public class MainActivity extends Activity {
     private void fetchInfo(String url) {
         if (!isValidUrl(url)) return;
         currentUrl = url;
-
         infoCard.setVisibility(View.GONE);
         menuPanel.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
@@ -256,7 +310,6 @@ public class MainActivity extends Activity {
                 int    duration = json.optInt("duration", 0);
                 String dur      = duration > 0 ? "  •  " + fmtDur(duration) : "";
 
-                // Server controls which buttons to show
                 showSubtitles = json.optBoolean("show_subtitles", false);
                 showTextOnly  = json.optBoolean("show_textonly", false);
                 showPhotos    = json.optBoolean("show_photos", false);
@@ -279,11 +332,7 @@ public class MainActivity extends Activity {
                 handler.post(() -> {
                     statusText.setText("Choose format:");
                     statusText.setTextColor(0xFF888888);
-                    // Default: show video and audio only
-                    showSubtitles = false;
-                    showTextOnly  = false;
-                    showPhotos    = false;
-                    showPlaylist  = false;
+                    showSubtitles = showTextOnly = showPhotos = showPlaylist = false;
                     showMenu();
                 });
             }
@@ -316,6 +365,8 @@ public class MainActivity extends Activity {
                 JSONObject body = new JSONObject();
                 body.put("url", currentUrl);
                 body.put("format", fmt);
+                body.put("save_folder", selectedFolder);
+
                 HttpURLConnection conn = openConn(serverUrl + "/download", "POST", body.toString());
                 String resp = readResp(conn);
                 conn.disconnect();
@@ -339,10 +390,10 @@ public class MainActivity extends Activity {
                 String resp = readResp(conn);
                 conn.disconnect();
                 JSONObject json = new JSONObject(resp);
+
                 String status   = json.optString("status", "");
                 int    progress = json.optInt("progress", 0);
                 String platform = json.optString("platform", "");
-                int    count    = json.optInt("count", 0);
 
                 handler.post(() -> {
                     progressBar.setProgress(progress);
@@ -351,9 +402,10 @@ public class MainActivity extends Activity {
                 });
 
                 if ("done".equals(status)) {
-                    String mainFile = json.optString("main_file", "");
+                    int    count    = json.optInt("count", 1);
                     double sizeMb   = json.optDouble("size_mb", 0);
-                    handler.post(() -> triggerDownload(jobId, mainFile, sizeMb, count));
+                    String folder   = json.optString("save_folder", "");
+                    handler.post(() -> onDownloadDone(count, sizeMb, folder));
                 } else if ("error".equals(status)) {
                     handler.post(() -> showError(json.optString("error", "Download failed")));
                 } else {
@@ -365,26 +417,14 @@ public class MainActivity extends Activity {
         }), 1000);
     }
 
-    private void triggerDownload(String jobId, String filename, double sizeMb, int count) {
-        try {
-            // URL-encode each path segment separately
-            String encodedFilename = Uri.encode(filename, "/");
-            String fileUrl = serverUrl + "/file/" + jobId + "/" + encodedFilename;
-            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            DownloadManager.Request req = new DownloadManager.Request(Uri.parse(fileUrl));
-            String displayName = filename.contains("/") ?
-                    filename.substring(filename.lastIndexOf("/") + 1) : filename;
-            req.setTitle(displayName);
-            req.setDescription("Albo Downloader");
-            req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, displayName);
-            if (dm != null) dm.enqueue(req);
-        } catch (Exception ignored) {}
+    private void onDownloadDone(int count, double sizeMb, String folder) {
+        String sizeStr  = sizeMb > 0 ? String.format(" • %.1f MB", sizeMb) : "";
+        String countStr = count > 1  ? count + " files" : "1 file";
+        String folderName = folder.isEmpty() ? "Downloads/Albo Downloader" :
+            folder.replace("\\", "/").replaceAll(".*[/\\\\]", "");
 
-        String sizeStr  = sizeMb > 0 ? String.format(" (%.1f MB)", sizeMb) : "";
-        String countStr = count > 1  ? " — " + count + " files" : "";
-        resetUI("✓ Saved to Downloads!" + sizeStr + countStr);
-        toast("Saved to Downloads — check notification");
+        resetUI("✓ Saved " + countStr + sizeStr + "\n📁 " + folderName);
+        toast(count + " file(s) saved to " + folderName);
     }
 
     private void resetUI(String message) {
