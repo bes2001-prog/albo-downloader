@@ -247,7 +247,7 @@ public class MainActivity extends Activity {
 
                 JSONObject json = new JSONObject(resp);
                 if (json.has("error")) {
-                    handler.post(() -> showError(json.getString("error")));
+                    handler.post(() -> showError(json.optString("error", "Download failed")));
                     return;
                 }
 
