@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0F0F0F"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Albo Downloader"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/settingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚙"
+                android:textSize="18sp"
+                android:background="@android:color/transparent"
+                android:textColor="#888888"
+                android:padding="8dp" />
+        </LinearLayout>
+
+        <!-- Connection status -->
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Connecting to PC..."
+            android:textSize="13sp"
+            android:textColor="#888888"
+            android:layout_marginBottom="16dp" />
+
+        <!-- URL Input -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#1E1E1E"
+            android:padding="4dp"
+            android:layout_marginBottom="12dp">
+
+            <EditText
+                android:id="@+id/urlInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Paste URL here..."
+                android:hintTextColor="#555555"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:background="@android:color/transparent"
+                android:padding="12dp"
+                android:inputType="textUri"
+                android:imeOptions="actionDone"
+                android:maxLines="2" />
+
+            <Button
+                android:id="@+id/pasteBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Paste"
+                android:textColor="#FE2C55"
+                android:background="@android:color/transparent"
+                android:textSize="13sp"
+                android:padding="12dp" />
+        </LinearLayout>
+
+        <!-- Video info card -->
+        <LinearLayout
+            android:id="@+id/infoCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#1E1E1E"
+            android:padding="14dp"
+            android:layout_marginBottom="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/uploaderText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#888888"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Format picker -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="FORMAT"
+            android:textColor="#555555"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="6dp" />
+
+        <Spinner
+            android:id="@+id/formatSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="#1E1E1E"
+            android:layout_marginBottom="12dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp" />
+
+        <!-- Subtitles toggle -->
+        <CheckBox
+            android:id="@+id/subtitlesCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Download subtitles (SRT)"
+            android:textColor="#CCCCCC"
+            android:textSize="14sp"
+            android:buttonTint="#FE2C55"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Progress bar -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginBottom="16dp"
+            android:progressTint="#FE2C55"
+            android:progressBackgroundTint="#333333"
+            android:max="100"
+            android:visibility="gone" />
+
+        <!-- Download button -->
+        <Button
+            android:id="@+id/downloadBtn"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Download"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:background="#FE2C55"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Settings panel -->
+        <LinearLayout
+            android:id="@+id/settingsPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#1A1A1A"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="PC SERVER URL"
+                android:textColor="#555555"
+                android:textSize="11sp"
+                android:layout_marginBottom="8dp" />
+
+            <EditText
+                android:id="@+id/serverInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:background="#222222"
+                android:padding="12dp"
+                android:inputType="textUri"
+                android:hint="http://192.168.1.200:5005"
+                android:hintTextColor="#444444" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Change this if your PC's IP address changes"
+                android:textColor="#444444"
+                android:textSize="12sp"
+                android:layout_marginTop="8dp" />
+
+        </LinearLayout>
+
+        <!-- Supported sites -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Supports: TikTok • YouTube • Instagram • Twitter/X • Facebook • Reddit • Vimeo"
+            android:textColor="#333333"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginTop="16dp" />
+
+    </LinearLayout>
+</ScrollView>
