@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.albo.downloader'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.albo.downloader"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("KEYSTORE_PATH") ?: "tiktoktv.keystore"
+            def keystoreFile = new File(keystorePath)
+            if (!keystoreFile.isAbsolute()) {
+                keystoreFile = new File(rootProject.rootDir, keystorePath)
+            }
+            storeFile keystoreFile
+            storePassword System.getenv("KEY_STORE_PASSWORD") ?: "albo2024tv"
+            keyAlias System.getenv("KEY_ALIAS") ?: "tiktoktv"
+            keyPassword System.getenv("KEY_PASSWORD") ?: "albo2024tv"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+}
