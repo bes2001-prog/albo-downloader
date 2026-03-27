@@ -3,7 +3,14 @@
 Albo Downloader API Server
 ===========================
 Runs alongside tiktok_bot.py on your Windows PC.
-Handles: best, 720p, 480p, mp3, subtitles, textonly, playlist
+
+Format options:
+  best      - Best video quality from source
+  mp3       - Audio MP3 highest quality
+  subtitles - Video + SRT with timestamps
+  textonly  - Plain text transcript, no timestamps (YouTube only)
+  playlist  - YouTube playlist up to 150
+  photos    - Instagram/TikTok/Pinterest photos
 """
 
 import os
@@ -60,7 +67,19 @@ def get_platform(url):
     if "threads.net" in u:     return "Threads"
     return "Video"
 
-def run_download(job_id, url, fmt, subtitles):
+def supports_photos(platform):
+    """Platforms where Photos option makes sense."""
+    return platform in ("Instagram", "TikTok", "Pinterest", "Twitter/X")
+
+def supports_textonly(platform):
+    """Text Only (no timestamps) is YouTube only."""
+    return platform == "YouTube"
+
+def supports_playlist(url):
+    return "list=" in url and ("youtube.com" in url or "youtu.be" in url)
+
+
+def run_download(job_id, url, fmt, extra):
     ytdlp    = get_ytdlp()
     out_path = DOWNLOAD_DIR / job_id
     out_path.mkdir(exist_ok=True)
@@ -73,54 +92,96 @@ def run_download(job_id, url, fmt, subtitles):
 
     cmd = [ytdlp, *get_cookie_args()]
 
-    if fmt == "mp3":
-        cmd += [url, "--no-playlist",
-                "-x", "--audio-format", "mp3", "--audio-quality", "0",
-                "--embed-thumbnail", "--embed-metadata",
-                "--parse-metadata", "%(title)s:%(meta_title)s",
-                "--parse-metadata", "%(uploader)s:%(meta_artist)s",
-                "--concurrent-fragments", "8", "--retries", "3"]
+    # ── Video (best quality from source) ─────────────────────────────────────
+    if fmt == "video":
+        cmd += [
+            url, "--no-playlist",
+            # Try best MP4, fall back to best anything
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--concurrent-fragments", "8",
+            "--retries", "5",
+        ]
 
+    # ── MP3 — highest quality ─────────────────────────────────────────────────
+    elif fmt == "mp3":
+        cmd += [
+            url, "--no-playlist",
+            "-x",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",          # 0 = best (VBR ~320kbps)
+            "--embed-thumbnail",
+            "--embed-metadata",
+            "--parse-metadata", "%(title)s:%(meta_title)s",
+            "--parse-metadata", "%(uploader)s:%(meta_artist)s",
+            "--concurrent-fragments", "8",
+            "--retries", "5",
+        ]
+
+    # ── Subtitles — SRT WITH timestamps ───────────────────────────────────────
+    elif fmt == "subtitles":
+        cmd += [
+            url, "--no-playlist",
+            "--skip-download",               # don't download video
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs", "en",
+            "--convert-subs", "srt",         # SRT keeps timestamps
+        ]
+
+    # ── Text Only — plain text, NO timestamps (YouTube only) ─────────────────
     elif fmt == "textonly":
-        cmd += [url, "--no-playlist",
-                "--skip-download",
-                "--write-subs", "--write-auto-subs",
-                "--sub-langs", "en", "--convert-subs", "srt"]
+        cmd += [
+            url, "--no-playlist",
+            "--skip-download",
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs", "en",
+            "--convert-subs", "srt",         # download as SRT first
+        ]
+        # After download we will strip timestamps from the SRT file
 
+    # ── Playlist ──────────────────────────────────────────────────────────────
     elif fmt == "playlist":
-        cmd += [url, "--yes-playlist", "--playlist-end", "150",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
-                "--concurrent-fragments", "8", "--retries", "3", "--ignore-errors"]
+        cmd += [
+            url,
+            "--yes-playlist",
+            "--playlist-end", "150",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--concurrent-fragments", "8",
+            "--retries", "3",
+            "--ignore-errors",
+        ]
 
-    elif fmt == "720p":
+    # ── Photos ────────────────────────────────────────────────────────────────
+    elif fmt == "photos":
+        cmd += [
+            url, "--no-playlist",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+            # yt-dlp handles photos/carousels automatically
+            "--concurrent-fragments", "8",
+            "--retries", "5",
+        ]
+
+    else:
+        # Fallback to video
         cmd += [url, "--no-playlist",
-                "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
                 "--merge-output-format", "mp4",
-                "--concurrent-fragments", "8", "--retries", "3"]
+                "--concurrent-fragments", "8", "--retries", "5"]
 
-    elif fmt == "480p":
-        cmd += [url, "--no-playlist",
-                "-f", "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]",
-                "--merge-output-format", "mp4",
-                "--concurrent-fragments", "8", "--retries", "3"]
-
-    else:  # best
-        cmd += [url, "--no-playlist",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
-                "--concurrent-fragments", "8", "--retries", "3"]
-
-    if subtitles and fmt not in ("mp3", "textonly"):
-        cmd += ["--write-subs", "--write-auto-subs",
-                "--sub-langs", "en", "--convert-subs", "srt"]
-
-    cmd += ["-o", str(out_path / "%(title).80s.%(ext)s"),
-            "--newline", "--no-warnings"]
+    cmd += [
+        "-o", str(out_path / "%(title).80s.%(ext)s"),
+        "--newline",
+        "--no-warnings",
+    ]
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, encoding="utf-8", errors="replace")
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace"
+        )
         for line in proc.stdout:
             line = clean_ansi(line).strip()
             m = re.search(r'(\d+\.?\d*)%', line)
@@ -129,10 +190,14 @@ def run_download(job_id, url, fmt, subtitles):
                     jobs[job_id]["progress"] = int(float(m.group(1)))
         proc.wait()
 
-        if proc.returncode != 0 and fmt != "playlist":
+        # Playlists may partially succeed
+        if proc.returncode != 0 and fmt not in ("playlist",):
             with jobs_lock:
-                jobs[job_id].update({"status": "error",
-                                     "error": "Download failed — check URL or try another format"})
+                jobs[job_id].update({
+                    "status": "error",
+                    "error": "Download failed — check the URL or try another format"
+                })
+            log("❌", f"[{job_id}] yt-dlp exit {proc.returncode}")
             return
 
         all_files   = list(out_path.glob("*"))
@@ -144,11 +209,44 @@ def run_download(job_id, url, fmt, subtitles):
                 jobs[job_id].update({"status": "error", "error": "No file was downloaded"})
             return
 
+        # ── Post-process text only: strip timestamps from SRT ─────────────────
         if fmt == "textonly":
             srt_files = [f for f in media_files if f.suffix.lower() == ".srt"]
-            main_file = srt_files[0] if srt_files else media_files[0]
+            if srt_files:
+                srt_path = srt_files[0]
+                txt_path = srt_path.with_suffix(".txt")
+                try:
+                    content = srt_path.read_text(encoding="utf-8", errors="replace")
+                    # Remove sequence numbers, timestamps, blank lines — keep only text
+                    lines = content.split("\n")
+                    text_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        # Skip blank lines
+                        if not line:
+                            continue
+                        # Skip sequence numbers (pure digits)
+                        if line.isdigit():
+                            continue
+                        # Skip timestamp lines (contain --> )
+                        if "-->" in line:
+                            continue
+                        # Skip HTML tags
+                        line = re.sub(r'<[^>]+>', '', line)
+                        if line:
+                            text_lines.append(line)
+                    txt_path.write_text("\n".join(text_lines), encoding="utf-8")
+                    srt_path.unlink()   # remove the SRT
+                    media_files = [txt_path]
+                except Exception as e:
+                    log("⚠️", f"Failed to strip timestamps: {e}")
+                    media_files = srt_files  # fallback to raw SRT
+
+        # Pick main file
+        if fmt in ("subtitles", "textonly"):
+            main_file = media_files[0]
         else:
-            video_files = [f for f in media_files if f.suffix.lower() not in {".srt",".vtt",".json"}]
+            video_files = [f for f in media_files if f.suffix.lower() not in {".srt",".vtt",".json",".txt"}]
             video_files.sort(key=lambda f: f.stat().st_size, reverse=True)
             main_file = video_files[0] if video_files else media_files[0]
 
@@ -172,49 +270,77 @@ def run_download(job_id, url, fmt, subtitles):
         log("❌", f"[{job_id}] Exception: {e}")
 
 
+# ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok", "service": "Albo Downloader", "port": PORT})
 
+
 @app.route("/info", methods=["POST"])
 def get_info():
+    """Returns video info + which buttons to show for this URL."""
     data = request.json or {}
     url  = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "No URL provided"}), 400
+
+    platform = get_platform(url)
+
     try:
         result = subprocess.run(
             [get_ytdlp(), *get_cookie_args(), "--dump-json", "--no-playlist", url],
-            capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
-        if result.returncode != 0:
-            return jsonify({"error": "Could not fetch info"}), 400
-        import json
-        info = json.loads(result.stdout.split("\n")[0])
+            capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace"
+        )
+        info = {}
+        if result.returncode == 0 and result.stdout.strip():
+            import json as _json
+            info = _json.loads(result.stdout.split("\n")[0])
+
         return jsonify({
-            "title":    info.get("title", "Unknown"),
-            "duration": info.get("duration", 0),
-            "uploader": info.get("uploader", ""),
-            "platform": get_platform(url),
+            "title":         info.get("title", ""),
+            "duration":      info.get("duration", 0),
+            "uploader":      info.get("uploader", ""),
+            "platform":      platform,
+            # Tell the app which buttons to show
+            "show_photos":   supports_photos(platform),
+            "show_textonly": supports_textonly(platform),
+            "show_playlist": supports_playlist(url),
         })
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "Timed out"}), 504
+        # Return platform info even if fetch times out
+        return jsonify({
+            "title": "", "duration": 0, "uploader": "", "platform": platform,
+            "show_photos":   supports_photos(platform),
+            "show_textonly": supports_textonly(platform),
+            "show_playlist": supports_playlist(url),
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/download", methods=["POST"])
 def start_download():
-    data      = request.json or {}
-    url       = data.get("url", "").strip()
-    fmt       = data.get("format", "best")
-    subtitles = data.get("subtitles", False)
+    data  = request.json or {}
+    url   = data.get("url", "").strip()
+    fmt   = data.get("format", "video")
+    extra = data.get("extra", {})
+
     if not url:
         return jsonify({"error": "No URL provided"}), 400
+
     job_id = str(uuid.uuid4())[:8]
     with jobs_lock:
         jobs[job_id] = {"status": "queued", "progress": 0, "url": url, "format": fmt}
-    threading.Thread(target=run_download, args=(job_id, url, fmt, subtitles), daemon=True).start()
+
+    threading.Thread(
+        target=run_download, args=(job_id, url, fmt, extra), daemon=True
+    ).start()
+
     log("📥", f"[{job_id}] Queued {fmt} — {url[:60]}")
     return jsonify({"job_id": job_id})
+
 
 @app.route("/status/<job_id>")
 def job_status(job_id):
@@ -223,6 +349,7 @@ def job_status(job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     return jsonify(job)
+
 
 @app.route("/file/<job_id>/<filename>")
 def get_file(job_id, filename):
@@ -247,16 +374,19 @@ def get_file(job_id, filename):
     log("📤", f"[{job_id}] Sending {filename}")
     return send_file(str(file_path), as_attachment=True, download_name=filename)
 
+
 @app.route("/jobs")
 def list_jobs():
     with jobs_lock:
         return jsonify(dict(jobs))
+
 
 if __name__ == "__main__":
     import sys
     if sys.platform == "win32":
         os.system("")
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     print("\n" + "=" * 52)
     print("  🎬  Albo Downloader Server")
     print(f"  Running on  : http://0.0.0.0:{PORT}")
@@ -264,4 +394,5 @@ if __name__ == "__main__":
     print(f"  Cookies     : {'✅ Found' if COOKIES_FILE.exists() else '❌ Not found'}")
     print(f"  yt-dlp      : {get_ytdlp()}")
     print("=" * 52 + "\n")
+
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
