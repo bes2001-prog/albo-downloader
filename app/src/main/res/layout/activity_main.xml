@@ -20,6 +20,7 @@
             android:textColor="#FFFFFF"
             android:layout_marginBottom="2dp" />
 
+        <!-- Connection status -->
         <TextView
             android:id="@+id/connectionText"
             android:layout_width="match_parent"
@@ -61,7 +62,7 @@
                 android:inputType="textUri" />
         </LinearLayout>
 
-        <!-- URL input with Paste and X clear button -->
+        <!-- URL input row with X and Paste -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -83,7 +84,6 @@
                 android:imeOptions="actionDone"
                 android:maxLines="2" />
 
-            <!-- X clear button - only visible when URL is typed -->
             <Button
                 android:id="@+id/clearBtn"
                 android:layout_width="36dp"
@@ -106,6 +106,35 @@
                 android:background="@android:color/transparent"
                 android:textSize="14sp"
                 android:paddingEnd="14dp" />
+        </LinearLayout>
+
+        <!-- Folder picker row -->
+        <LinearLayout
+            android:id="@+id/folderRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#1A1A1A"
+            android:padding="12dp"
+            android:layout_marginBottom="10dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <TextView
+                android:id="@+id/folderText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="📁 Save to: Default"
+                android:textColor="#AAAAAA"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Change ›"
+                android:textColor="#FE2C55"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <!-- Info card -->
@@ -166,7 +195,7 @@
             android:max="100"
             android:visibility="gone" />
 
-        <!-- Menu - buttons shown/hidden dynamically per platform -->
+        <!-- Format buttons -->
         <LinearLayout
             android:id="@+id/menuPanel"
             android:layout_width="match_parent"
@@ -174,92 +203,57 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <Button
-                android:id="@+id/btnVideo"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="🎬  Video"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E" />
+            <Button android:id="@+id/btnVideo"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="🎬  Video"
+                android:textColor="#FFFFFF" android:textSize="15sp" android:background="#1E1E1E" />
 
-            <Button
-                android:id="@+id/btnAudio"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="🎵  Audio (MP3)"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E" />
+            <Button android:id="@+id/btnAudio"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="🎵  Audio (MP3)"
+                android:textColor="#FFFFFF" android:textSize="15sp" android:background="#1E1E1E" />
 
-            <!-- YouTube / Vimeo / Twitch only -->
-            <Button
-                android:id="@+id/btnSubtitles"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="📝  Subtitles (SRT with timestamps)"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E"
+            <!-- YouTube/Vimeo/Twitch only -->
+            <Button android:id="@+id/btnSubtitles"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="📝  Subtitles (SRT with timestamps)"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:background="#1E1E1E"
                 android:visibility="gone" />
 
             <!-- YouTube only -->
-            <Button
-                android:id="@+id/btnTextOnly"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="📄  Text Only (no timestamps)"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E"
+            <Button android:id="@+id/btnTextOnly"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="📄  Text Only (no timestamps)"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:background="#1E1E1E"
                 android:visibility="gone" />
 
-            <!-- Instagram / TikTok / Pinterest / Twitter only -->
-            <Button
-                android:id="@+id/btnPhotos"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="🖼  Photos / Album"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E"
+            <!-- Instagram/TikTok/Pinterest only -->
+            <Button android:id="@+id/btnPhotos"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="🖼  Photos / Album"
+                android:textColor="#FFFFFF" android:textSize="15sp" android:background="#1E1E1E"
                 android:visibility="gone" />
 
             <!-- YouTube playlist only -->
-            <Button
-                android:id="@+id/btnPlaylist"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginBottom="8dp"
-                android:text="📋  Download Playlist (up to 150)"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:background="#1E1E1E"
+            <Button android:id="@+id/btnPlaylist"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginBottom="8dp" android:text="📋  Download Playlist (up to 150)"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:background="#1E1E1E"
                 android:visibility="gone" />
 
         </LinearLayout>
 
-        <!-- Download another format -->
+        <!-- Again panel -->
         <LinearLayout
             android:id="@+id/againPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone">
 
-            <Button
-                android:id="@+id/btnAgain"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="6dp"
-                android:text="🔄  Download another format"
-                android:textColor="#888888"
-                android:textSize="14sp"
-                android:background="#1A1A1A" />
+            <Button android:id="@+id/btnAgain"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:layout_marginTop="6dp" android:text="🔄  Download another format"
+                android:textColor="#888888" android:textSize="14sp" android:background="#1A1A1A" />
         </LinearLayout>
 
         <TextView
