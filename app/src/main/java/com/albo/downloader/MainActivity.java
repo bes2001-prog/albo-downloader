@@ -14,7 +14,6 @@ import android.os.Looper;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
-import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -27,24 +26,26 @@ public class MainActivity extends Activity {
 
     private static final String DEFAULT_SERVER = "http://192.168.1.200:5005";
 
-    // Views
-    private EditText urlInput, serverInput;
-    private Button pasteBtn, btnVideo, btnAudio, btnSubtitles, btnTextOnly,
-                   btnPlaylist, btnAgain;
+    private EditText   urlInput, serverInput;
+    private Button     pasteBtn, btnVideo, btnAudio, btnSubtitles, btnTextOnly,
+                       btnPhotos, btnPlaylist, btnAgain;
     private ProgressBar progressBar;
-    private TextView statusText, titleText, uploaderText, connectionText;
-    private LinearLayout menuPanel, settingsPanel, infoCard, qualityPanel, againPanel;
-    private View divider;
+    private TextView   statusText, titleText, uploaderText, connectionText;
+    private LinearLayout menuPanel, settingsPanel, infoCard, againPanel;
+    private View       divider;
 
-    private String serverUrl;
-    private String currentJobId;
-    private String currentUrl;
+    private String  serverUrl;
+    private String  currentUrl;
+    private String  currentJobId;
     private boolean isDownloading = false;
-    private boolean isPlaylist    = false;
-    private boolean showQuality   = false;
 
-    private final Handler          handler  = new Handler(Looper.getMainLooper());
-    private final ExecutorService  executor = Executors.newCachedThreadPool();
+    // Flags from /info response - control which buttons show
+    private boolean showPhotos   = false;
+    private boolean showTextOnly = false;
+    private boolean showPlaylist = false;
+
+    private final Handler         handler  = new Handler(Looper.getMainLooper());
+    private final ExecutorService executor = Executors.newCachedThreadPool();
     private SharedPreferences prefs;
 
     @Override
@@ -84,6 +85,7 @@ public class MainActivity extends Activity {
         btnAudio       = findViewById(R.id.btnAudio);
         btnSubtitles   = findViewById(R.id.btnSubtitles);
         btnTextOnly    = findViewById(R.id.btnTextOnly);
+        btnPhotos      = findViewById(R.id.btnPhotos);
         btnPlaylist    = findViewById(R.id.btnPlaylist);
         btnAgain       = findViewById(R.id.btnAgain);
         progressBar    = findViewById(R.id.progressBar);
@@ -94,7 +96,6 @@ public class MainActivity extends Activity {
         menuPanel      = findViewById(R.id.menuPanel);
         settingsPanel  = findViewById(R.id.settingsPanel);
         infoCard       = findViewById(R.id.infoCard);
-        qualityPanel   = findViewById(R.id.qualityPanel);
         againPanel     = findViewById(R.id.againPanel);
         divider        = findViewById(R.id.divider);
 
@@ -102,7 +103,6 @@ public class MainActivity extends Activity {
         menuPanel.setVisibility(View.GONE);
         infoCard.setVisibility(View.GONE);
         settingsPanel.setVisibility(View.GONE);
-        qualityPanel.setVisibility(View.GONE);
         progressBar.setVisibility(View.GONE);
         divider.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
@@ -119,38 +119,26 @@ public class MainActivity extends Activity {
             }
         });
 
-        urlInput.setOnEditorActionListener((v, actionId, event) -> {
+        urlInput.setOnEditorActionListener((v, id, e) -> {
             String url = urlInput.getText().toString().trim();
             if (!url.isEmpty()) fetchInfo(url);
             hideKeyboard();
             return true;
         });
 
-        // Main format buttons - match Telegram bot exactly
-        btnVideo.setOnClickListener(v -> {
-            // Show quality sub-menu
-            qualityPanel.setVisibility(qualityPanel.getVisibility() == View.VISIBLE
-                    ? View.GONE : View.VISIBLE);
-        });
+        // Each button starts a specific format download
+        btnVideo.setOnClickListener(v     -> startDownload("video"));
+        btnAudio.setOnClickListener(v     -> startDownload("mp3"));
+        btnSubtitles.setOnClickListener(v -> startDownload("subtitles"));
+        btnTextOnly.setOnClickListener(v  -> startDownload("textonly"));
+        btnPhotos.setOnClickListener(v    -> startDownload("photos"));
+        btnPlaylist.setOnClickListener(v  -> startDownload("playlist"));
 
-        // Quality sub-buttons
-        findViewById(R.id.btnBest).setOnClickListener(v -> startDownload("best", false));
-        findViewById(R.id.btn720p).setOnClickListener(v -> startDownload("720p", false));
-        findViewById(R.id.btn480p).setOnClickListener(v -> startDownload("480p", false));
-
-        btnAudio.setOnClickListener(v -> startDownload("mp3", false));
-        btnSubtitles.setOnClickListener(v -> startDownload("best", true));   // video + subtitles
-        btnTextOnly.setOnClickListener(v -> startDownload("textonly", false)); // subtitles only
-        btnPlaylist.setOnClickListener(v -> startDownload("playlist", false));
-
-        // Download another format
         btnAgain.setOnClickListener(v -> {
             againPanel.setVisibility(View.GONE);
-            qualityPanel.setVisibility(View.GONE);
             showMenu();
         });
 
-        // Tap connection text to toggle settings
         connectionText.setOnClickListener(v -> {
             boolean visible = settingsPanel.getVisibility() == View.VISIBLE;
             settingsPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
@@ -197,11 +185,9 @@ public class MainActivity extends Activity {
     private void fetchInfo(String url) {
         if (!isValidUrl(url)) return;
         currentUrl = url;
-        isPlaylist = url.contains("list=") && (url.contains("youtube.com") || url.contains("youtu.be"));
 
         infoCard.setVisibility(View.GONE);
         menuPanel.setVisibility(View.GONE);
-        qualityPanel.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
         divider.setVisibility(View.GONE);
         statusText.setText("Fetching info...");
@@ -216,22 +202,22 @@ public class MainActivity extends Activity {
                 conn.disconnect();
                 JSONObject json = new JSONObject(resp);
 
-                if (json.has("error")) {
-                    handler.post(() -> { statusText.setText("Choose format:"); showMenu(); });
-                    return;
-                }
-
                 String title    = json.optString("title", "");
                 String uploader = json.optString("uploader", "");
-                String platform = json.optString("platform", "");
+                String platform = json.optString("platform", "Video");
                 int    duration = json.optInt("duration", 0);
-                String dur      = duration > 0 ? "  •  " + fmt(duration) : "";
+                String dur      = duration > 0 ? "  •  " + fmtDur(duration) : "";
+
+                // Server tells us which buttons to show
+                showPhotos   = json.optBoolean("show_photos", false);
+                showTextOnly = json.optBoolean("show_textonly", false);
+                showPlaylist = json.optBoolean("show_playlist", false);
 
                 handler.post(() -> {
                     if (!title.isEmpty()) {
                         titleText.setText(title);
                         uploaderText.setText(platform
-                                + (uploader.isEmpty() ? "" : "  •  " + uploader) + dur);
+                            + (uploader.isEmpty() ? "" : "  •  " + uploader) + dur);
                         infoCard.setVisibility(View.VISIBLE);
                         divider.setVisibility(View.VISIBLE);
                     }
@@ -241,24 +227,30 @@ public class MainActivity extends Activity {
                 });
 
             } catch (Exception e) {
-                handler.post(() -> { statusText.setText("Choose format:"); showMenu(); });
+                handler.post(() -> {
+                    statusText.setText("Choose format:");
+                    statusText.setTextColor(0xFF888888);
+                    showMenu();
+                });
             }
         });
     }
 
     private void showMenu() {
-        btnPlaylist.setVisibility(isPlaylist ? View.VISIBLE : View.GONE);
-        menuPanel.setVisibility(View.VISIBLE);
+        // Show/hide buttons based on what server told us
+        btnTextOnly.setVisibility(showTextOnly ? View.VISIBLE : View.GONE);
+        btnPhotos.setVisibility(showPhotos ? View.VISIBLE : View.GONE);
+        btnPlaylist.setVisibility(showPlaylist ? View.VISIBLE : View.GONE);
         setButtonsEnabled(true);
+        menuPanel.setVisibility(View.VISIBLE);
     }
 
-    private void startDownload(String fmt, boolean subtitles) {
+    private void startDownload(String fmt) {
         if (currentUrl == null || currentUrl.isEmpty()) { toast("Paste a URL first"); return; }
         if (isDownloading) return;
 
         isDownloading = true;
         setButtonsEnabled(false);
-        qualityPanel.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
         progressBar.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
@@ -270,7 +262,6 @@ public class MainActivity extends Activity {
                 JSONObject body = new JSONObject();
                 body.put("url", currentUrl);
                 body.put("format", fmt);
-                body.put("subtitles", subtitles);
 
                 HttpURLConnection conn = openConn(serverUrl + "/download", "POST", body.toString());
                 String resp = readResp(conn);
@@ -278,7 +269,7 @@ public class MainActivity extends Activity {
 
                 JSONObject json = new JSONObject(resp);
                 if (json.has("error")) {
-                    handler.post(() -> showError(json.optString("error", "Download failed")));
+                    handler.post(() -> showError(json.optString("error", "Failed")));
                     return;
                 }
                 currentJobId = json.getString("job_id");
@@ -303,15 +294,14 @@ public class MainActivity extends Activity {
 
                 handler.post(() -> {
                     progressBar.setProgress(progress);
-                    if (progress > 0) statusText.setText("Downloading " + platform + "... " + progress + "%");
+                    if (progress > 0)
+                        statusText.setText("Downloading " + platform + "... " + progress + "%");
                 });
 
                 if ("done".equals(status)) {
                     String mainFile = json.optString("main_file", "");
                     double sizeMb   = json.optDouble("size_mb", 0);
-                    // Check if there are multiple files (photos/playlist)
-                    JSONArray files = json.optJSONArray("files");
-                    handler.post(() -> triggerDownload(jobId, mainFile, sizeMb, files));
+                    handler.post(() -> triggerDownload(jobId, mainFile, sizeMb));
                 } else if ("error".equals(status)) {
                     handler.post(() -> showError(json.optString("error", "Download failed")));
                 } else {
@@ -323,8 +313,7 @@ public class MainActivity extends Activity {
         }), 1000);
     }
 
-    private void triggerDownload(String jobId, String filename, double sizeMb, JSONArray files) {
-        // Save main file to Downloads
+    private void triggerDownload(String jobId, String filename, double sizeMb) {
         try {
             String fileUrl = serverUrl + "/file/" + jobId + "/" + Uri.encode(filename);
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
@@ -346,9 +335,8 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(View.GONE);
         statusText.setText(message);
         statusText.setTextColor(0xFF4CAF50);
-        // Show "Download another format" button
-        againPanel.setVisibility(View.VISIBLE);
         setButtonsEnabled(true);
+        againPanel.setVisibility(View.VISIBLE);
     }
 
     private void showError(String msg) {
@@ -361,15 +349,15 @@ public class MainActivity extends Activity {
     }
 
     private void setButtonsEnabled(boolean on) {
-        for (int id : new int[]{R.id.btnVideo, R.id.btnAudio, R.id.btnSubtitles,
-                                R.id.btnTextOnly, R.id.btnPlaylist,
-                                R.id.btnBest, R.id.btn720p, R.id.btn480p}) {
+        int[] ids = {R.id.btnVideo, R.id.btnAudio, R.id.btnSubtitles,
+                     R.id.btnTextOnly, R.id.btnPhotos, R.id.btnPlaylist};
+        for (int id : ids) {
             View v = findViewById(id);
             if (v != null) { v.setEnabled(on); v.setAlpha(on ? 1f : 0.5f); }
         }
     }
 
-    private String fmt(int secs) {
+    private String fmtDur(int secs) {
         int m = secs / 60, s = secs % 60;
         return m >= 60 ? String.format("%dh %02dm", m / 60, m % 60)
                        : String.format("%d:%02d", m, s);
