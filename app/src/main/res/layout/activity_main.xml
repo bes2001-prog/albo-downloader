@@ -64,7 +64,6 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:hint="Paste URL here..."
-                android:hintTextColor="#555555"
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:background="@android:color/transparent"
@@ -196,8 +195,7 @@
                 android:background="#222222"
                 android:padding="12dp"
                 android:inputType="textUri"
-                android:hint="http://192.168.1.200:5005"
-                android:hintTextColor="#444444" />
+                android:hint="http://192.168.1.200:5005" />
 
             <TextView
                 android:layout_width="match_parent"
