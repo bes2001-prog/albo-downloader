@@ -14,6 +14,7 @@ import android.os.Looper;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -28,31 +29,30 @@ public class MainActivity extends Activity {
 
     // Views
     private EditText urlInput, serverInput;
-    private Button pasteBtn, btnVideo, btnAudio, btnPlaylist;
-    private CheckBox subtitlesCheck;
+    private Button pasteBtn, btnVideo, btnAudio, btnSubtitles, btnTextOnly,
+                   btnPlaylist, btnAgain;
     private ProgressBar progressBar;
     private TextView statusText, titleText, uploaderText, connectionText;
-    private LinearLayout menuPanel, settingsPanel, infoCard;
+    private LinearLayout menuPanel, settingsPanel, infoCard, qualityPanel, againPanel;
     private View divider;
 
     private String serverUrl;
     private String currentJobId;
     private String currentUrl;
     private boolean isDownloading = false;
-    private boolean isPlaylist = false;
+    private boolean isPlaylist    = false;
+    private boolean showQuality   = false;
 
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final Handler          handler  = new Handler(Looper.getMainLooper());
+    private final ExecutorService  executor = Executors.newCachedThreadPool();
     private SharedPreferences prefs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        prefs = getSharedPreferences("albo_dl", MODE_PRIVATE);
+        prefs     = getSharedPreferences("albo_dl", MODE_PRIVATE);
         serverUrl = prefs.getString("server_url", DEFAULT_SERVER);
-
         bindViews();
         setupListeners();
         checkConnection();
@@ -82,8 +82,10 @@ public class MainActivity extends Activity {
         pasteBtn       = findViewById(R.id.pasteBtn);
         btnVideo       = findViewById(R.id.btnVideo);
         btnAudio       = findViewById(R.id.btnAudio);
+        btnSubtitles   = findViewById(R.id.btnSubtitles);
+        btnTextOnly    = findViewById(R.id.btnTextOnly);
         btnPlaylist    = findViewById(R.id.btnPlaylist);
-        subtitlesCheck = findViewById(R.id.subtitlesCheck);
+        btnAgain       = findViewById(R.id.btnAgain);
         progressBar    = findViewById(R.id.progressBar);
         statusText     = findViewById(R.id.statusText);
         titleText      = findViewById(R.id.titleText);
@@ -92,18 +94,21 @@ public class MainActivity extends Activity {
         menuPanel      = findViewById(R.id.menuPanel);
         settingsPanel  = findViewById(R.id.settingsPanel);
         infoCard       = findViewById(R.id.infoCard);
+        qualityPanel   = findViewById(R.id.qualityPanel);
+        againPanel     = findViewById(R.id.againPanel);
         divider        = findViewById(R.id.divider);
 
         serverInput.setText(serverUrl);
         menuPanel.setVisibility(View.GONE);
         infoCard.setVisibility(View.GONE);
         settingsPanel.setVisibility(View.GONE);
+        qualityPanel.setVisibility(View.GONE);
         progressBar.setVisibility(View.GONE);
         divider.setVisibility(View.GONE);
+        againPanel.setVisibility(View.GONE);
     }
 
     private void setupListeners() {
-        // Paste button
         pasteBtn.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip() != null) {
@@ -114,7 +119,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // URL input done
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             String url = urlInput.getText().toString().trim();
             if (!url.isEmpty()) fetchInfo(url);
@@ -122,31 +126,36 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        // Video button
+        // Main format buttons - match Telegram bot exactly
         btnVideo.setOnClickListener(v -> {
-            if (isDownloading) return;
-            startDownload("best");
+            // Show quality sub-menu
+            qualityPanel.setVisibility(qualityPanel.getVisibility() == View.VISIBLE
+                    ? View.GONE : View.VISIBLE);
         });
 
-        // Audio / MP3 button
-        btnAudio.setOnClickListener(v -> {
-            if (isDownloading) return;
-            startDownload("mp3");
+        // Quality sub-buttons
+        findViewById(R.id.btnBest).setOnClickListener(v -> startDownload("best", false));
+        findViewById(R.id.btn720p).setOnClickListener(v -> startDownload("720p", false));
+        findViewById(R.id.btn480p).setOnClickListener(v -> startDownload("480p", false));
+
+        btnAudio.setOnClickListener(v -> startDownload("mp3", false));
+        btnSubtitles.setOnClickListener(v -> startDownload("best", true));   // video + subtitles
+        btnTextOnly.setOnClickListener(v -> startDownload("textonly", false)); // subtitles only
+        btnPlaylist.setOnClickListener(v -> startDownload("playlist", false));
+
+        // Download another format
+        btnAgain.setOnClickListener(v -> {
+            againPanel.setVisibility(View.GONE);
+            qualityPanel.setVisibility(View.GONE);
+            showMenu();
         });
 
-        // Playlist button
-        btnPlaylist.setOnClickListener(v -> {
-            if (isDownloading) return;
-            startDownload("playlist");
-        });
-
-        // Settings toggle - tap connection text
+        // Tap connection text to toggle settings
         connectionText.setOnClickListener(v -> {
             boolean visible = settingsPanel.getVisibility() == View.VISIBLE;
             settingsPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
         });
 
-        // Save server URL on focus change
         serverInput.setOnFocusChangeListener((v, hasFocus) -> {
             if (!hasFocus) {
                 String url = serverInput.getText().toString().trim();
@@ -162,10 +171,9 @@ public class MainActivity extends Activity {
     private void checkConnection() {
         connectionText.setText("Connecting to PC...");
         connectionText.setTextColor(0xFF888888);
-
         executor.execute(() -> {
             try {
-                HttpURLConnection conn = openConnection(serverUrl + "/ping", "GET", null);
+                HttpURLConnection conn = openConn(serverUrl + "/ping", "GET", null);
                 int code = conn.getResponseCode();
                 conn.disconnect();
                 handler.post(() -> {
@@ -191,9 +199,10 @@ public class MainActivity extends Activity {
         currentUrl = url;
         isPlaylist = url.contains("list=") && (url.contains("youtube.com") || url.contains("youtu.be"));
 
-        // Show loading state
         infoCard.setVisibility(View.GONE);
         menuPanel.setVisibility(View.GONE);
+        qualityPanel.setVisibility(View.GONE);
+        againPanel.setVisibility(View.GONE);
         divider.setVisibility(View.GONE);
         statusText.setText("Fetching info...");
         statusText.setTextColor(0xFF888888);
@@ -202,77 +211,69 @@ public class MainActivity extends Activity {
             try {
                 JSONObject body = new JSONObject();
                 body.put("url", url);
-                HttpURLConnection conn = openConnection(serverUrl + "/info", "POST", body.toString());
-                String resp = readResponse(conn);
+                HttpURLConnection conn = openConn(serverUrl + "/info", "POST", body.toString());
+                String resp = readResp(conn);
                 conn.disconnect();
                 JSONObject json = new JSONObject(resp);
 
                 if (json.has("error")) {
-                    handler.post(() -> {
-                        statusText.setText("Could not fetch info — paste a valid URL");
-                        showMenu();
-                    });
+                    handler.post(() -> { statusText.setText("Choose format:"); showMenu(); });
                     return;
                 }
 
                 String title    = json.optString("title", "");
                 String uploader = json.optString("uploader", "");
-                int duration    = json.optInt("duration", 0);
                 String platform = json.optString("platform", "");
-                String dur      = duration > 0 ? "  •  " + formatDuration(duration) : "";
+                int    duration = json.optInt("duration", 0);
+                String dur      = duration > 0 ? "  •  " + fmt(duration) : "";
 
                 handler.post(() -> {
                     if (!title.isEmpty()) {
                         titleText.setText(title);
-                        uploaderText.setText(platform + (uploader.isEmpty() ? "" : "  •  " + uploader) + dur);
+                        uploaderText.setText(platform
+                                + (uploader.isEmpty() ? "" : "  •  " + uploader) + dur);
                         infoCard.setVisibility(View.VISIBLE);
                         divider.setVisibility(View.VISIBLE);
                     }
-                    statusText.setText("Choose format:");
-                    statusText.setTextColor(0xFF888888);
+                    statusText.setText("What do you want from this " + platform + " link?");
+                    statusText.setTextColor(0xFFCCCCCC);
                     showMenu();
                 });
 
             } catch (Exception e) {
-                handler.post(() -> {
-                    statusText.setText("Choose format:");
-                    statusText.setTextColor(0xFF888888);
-                    showMenu();
-                });
+                handler.post(() -> { statusText.setText("Choose format:"); showMenu(); });
             }
         });
     }
 
     private void showMenu() {
-        // Show playlist button only for playlist URLs
         btnPlaylist.setVisibility(isPlaylist ? View.VISIBLE : View.GONE);
         menuPanel.setVisibility(View.VISIBLE);
+        setButtonsEnabled(true);
     }
 
-    private void startDownload(String fmt) {
-        if (currentUrl == null || currentUrl.isEmpty()) {
-            toast("Paste a URL first");
-            return;
-        }
+    private void startDownload(String fmt, boolean subtitles) {
+        if (currentUrl == null || currentUrl.isEmpty()) { toast("Paste a URL first"); return; }
+        if (isDownloading) return;
 
         isDownloading = true;
         setButtonsEnabled(false);
+        qualityPanel.setVisibility(View.GONE);
+        againPanel.setVisibility(View.GONE);
         progressBar.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
         statusText.setText("Starting download...");
         statusText.setTextColor(0xFF888888);
-
-        boolean subs = subtitlesCheck.isChecked();
 
         executor.execute(() -> {
             try {
                 JSONObject body = new JSONObject();
                 body.put("url", currentUrl);
                 body.put("format", fmt);
-                body.put("subtitles", subs);
+                body.put("subtitles", subtitles);
 
-                HttpURLConnection conn = openConnection(serverUrl + "/download", "POST", body.toString());
-                String resp = readResponse(conn);
+                HttpURLConnection conn = openConn(serverUrl + "/download", "POST", body.toString());
+                String resp = readResp(conn);
                 conn.disconnect();
 
                 JSONObject json = new JSONObject(resp);
@@ -280,10 +281,8 @@ public class MainActivity extends Activity {
                     handler.post(() -> showError(json.optString("error", "Download failed")));
                     return;
                 }
-
                 currentJobId = json.getString("job_id");
                 pollProgress(currentJobId);
-
             } catch (Exception e) {
                 handler.post(() -> showError(e.getMessage()));
             }
@@ -291,48 +290,43 @@ public class MainActivity extends Activity {
     }
 
     private void pollProgress(String jobId) {
-        handler.postDelayed(() -> {
-            executor.execute(() -> {
-                try {
-                    HttpURLConnection conn = openConnection(serverUrl + "/status/" + jobId, "GET", null);
-                    String resp = readResponse(conn);
-                    conn.disconnect();
-                    JSONObject json = new JSONObject(resp);
+        handler.postDelayed(() -> executor.execute(() -> {
+            try {
+                HttpURLConnection conn = openConn(serverUrl + "/status/" + jobId, "GET", null);
+                String resp = readResp(conn);
+                conn.disconnect();
+                JSONObject json = new JSONObject(resp);
 
-                    String status   = json.optString("status", "");
-                    int progress    = json.optInt("progress", 0);
-                    String platform = json.optString("platform", "");
+                String status   = json.optString("status", "");
+                int    progress = json.optInt("progress", 0);
+                String platform = json.optString("platform", "");
 
-                    handler.post(() -> {
-                        progressBar.setProgress(progress);
-                        if (progress > 0) {
-                            statusText.setText("Downloading " + platform + "... " + progress + "%");
-                        }
-                    });
+                handler.post(() -> {
+                    progressBar.setProgress(progress);
+                    if (progress > 0) statusText.setText("Downloading " + platform + "... " + progress + "%");
+                });
 
-                    if ("done".equals(status)) {
-                        String mainFile = json.optString("main_file", "");
-                        double sizeMb   = json.optDouble("size_mb", 0);
-                        handler.post(() -> triggerFileDownload(jobId, mainFile, sizeMb));
-                    } else if ("error".equals(status)) {
-                        String err = json.optString("error", "Download failed");
-                        handler.post(() -> showError(err));
-                    } else {
-                        pollProgress(jobId); // keep polling
-                    }
-
-                } catch (Exception e) {
-                    handler.post(() -> showError(e.getMessage()));
+                if ("done".equals(status)) {
+                    String mainFile = json.optString("main_file", "");
+                    double sizeMb   = json.optDouble("size_mb", 0);
+                    // Check if there are multiple files (photos/playlist)
+                    JSONArray files = json.optJSONArray("files");
+                    handler.post(() -> triggerDownload(jobId, mainFile, sizeMb, files));
+                } else if ("error".equals(status)) {
+                    handler.post(() -> showError(json.optString("error", "Download failed")));
+                } else {
+                    pollProgress(jobId);
                 }
-            });
-        }, 1000);
+            } catch (Exception e) {
+                handler.post(() -> showError(e.getMessage()));
+            }
+        }), 1000);
     }
 
-    private void triggerFileDownload(String jobId, String filename, double sizeMb) {
-        String fileUrl = serverUrl + "/file/" + jobId + "/" + Uri.encode(filename);
-
-        // Save to Downloads folder via DownloadManager
+    private void triggerDownload(String jobId, String filename, double sizeMb, JSONArray files) {
+        // Save main file to Downloads
         try {
+            String fileUrl = serverUrl + "/file/" + jobId + "/" + Uri.encode(filename);
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
             DownloadManager.Request req = new DownloadManager.Request(Uri.parse(fileUrl));
             req.setTitle(filename);
@@ -340,9 +334,7 @@ public class MainActivity extends Activity {
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
             if (dm != null) dm.enqueue(req);
-        } catch (Exception e) {
-            // Fallback — just show the URL
-        }
+        } catch (Exception ignored) {}
 
         String sizeStr = sizeMb > 0 ? String.format(" (%.1f MB)", sizeMb) : "";
         resetUI("✓ Saved to Downloads!" + sizeStr);
@@ -351,10 +343,12 @@ public class MainActivity extends Activity {
 
     private void resetUI(String message) {
         isDownloading = false;
-        setButtonsEnabled(true);
         progressBar.setVisibility(View.GONE);
         statusText.setText(message);
         statusText.setTextColor(0xFF4CAF50);
+        // Show "Download another format" button
+        againPanel.setVisibility(View.VISIBLE);
+        setButtonsEnabled(true);
     }
 
     private void showError(String msg) {
@@ -363,31 +357,30 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(View.GONE);
         statusText.setText("❌ " + (msg != null ? msg : "Something went wrong"));
         statusText.setTextColor(0xFFE53935);
+        againPanel.setVisibility(View.VISIBLE);
     }
 
-    private void setButtonsEnabled(boolean enabled) {
-        btnVideo.setEnabled(enabled);
-        btnAudio.setEnabled(enabled);
-        btnPlaylist.setEnabled(enabled);
-        btnVideo.setAlpha(enabled ? 1f : 0.5f);
-        btnAudio.setAlpha(enabled ? 1f : 0.5f);
-        btnPlaylist.setAlpha(enabled ? 1f : 0.5f);
+    private void setButtonsEnabled(boolean on) {
+        for (int id : new int[]{R.id.btnVideo, R.id.btnAudio, R.id.btnSubtitles,
+                                R.id.btnTextOnly, R.id.btnPlaylist,
+                                R.id.btnBest, R.id.btn720p, R.id.btn480p}) {
+            View v = findViewById(id);
+            if (v != null) { v.setEnabled(on); v.setAlpha(on ? 1f : 0.5f); }
+        }
     }
 
-    private String formatDuration(int seconds) {
-        int m = seconds / 60;
-        int s = seconds % 60;
-        if (m >= 60) return String.format("%dh %02dm", m / 60, m % 60);
-        return String.format("%d:%02d", m, s);
+    private String fmt(int secs) {
+        int m = secs / 60, s = secs % 60;
+        return m >= 60 ? String.format("%dh %02dm", m / 60, m % 60)
+                       : String.format("%d:%02d", m, s);
     }
 
     private boolean isValidUrl(String url) {
         return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
-    private HttpURLConnection openConnection(String urlStr, String method, String body) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+    private HttpURLConnection openConn(String urlStr, String method, String body) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
         conn.setRequestMethod(method);
         conn.setConnectTimeout(10000);
         conn.setReadTimeout(30000);
@@ -401,10 +394,9 @@ public class MainActivity extends Activity {
         return conn;
     }
 
-    private String readResponse(HttpURLConnection conn) throws Exception {
+    private String readResp(HttpURLConnection conn) throws Exception {
         InputStream is;
-        try { is = conn.getInputStream(); }
-        catch (IOException e) { is = conn.getErrorStream(); }
+        try { is = conn.getInputStream(); } catch (IOException e) { is = conn.getErrorStream(); }
         if (is == null) return "{}";
         BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
         StringBuilder sb = new StringBuilder();
