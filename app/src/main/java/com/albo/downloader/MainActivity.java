@@ -1,12 +1,14 @@
 package com.albo.downloader;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -14,15 +16,14 @@ import android.text.TextWatcher;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -34,23 +35,18 @@ public class MainActivity extends Activity {
     private Button     pasteBtn, clearBtn, btnVideo, btnAudio,
                        btnSubtitles, btnTextOnly, btnPhotos, btnPlaylist, btnAgain;
     private ProgressBar progressBar;
-    private TextView   statusText, titleText, uploaderText, connectionText,
-                       folderText;
-    private LinearLayout menuPanel, settingsPanel, infoCard, againPanel, folderRow;
+    private TextView   statusText, titleText, uploaderText, connectionText;
+    private LinearLayout menuPanel, settingsPanel, infoCard, againPanel;
     private View       divider;
 
     private String  serverUrl;
     private String  currentUrl;
     private String  currentJobId;
-    private String  selectedFolder = ""; // empty = server default
     private boolean isDownloading  = false;
     private boolean showSubtitles  = false;
     private boolean showTextOnly   = false;
     private boolean showPhotos     = false;
     private boolean showPlaylist   = false;
-
-    // Folder map loaded from server: display name -> full path
-    private final Map<String, String> folderMap = new LinkedHashMap<>();
 
     private final Handler         handler  = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newCachedThreadPool();
@@ -60,9 +56,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        prefs         = getSharedPreferences("albo_dl", MODE_PRIVATE);
-        serverUrl     = prefs.getString("server_url", DEFAULT_SERVER);
-        selectedFolder= prefs.getString("save_folder", "");
+        prefs     = getSharedPreferences("albo_dl", MODE_PRIVATE);
+        serverUrl = prefs.getString("server_url", DEFAULT_SERVER);
         bindViews();
         setupListeners();
         checkConnection();
@@ -123,8 +118,6 @@ public class MainActivity extends Activity {
         titleText      = findViewById(R.id.titleText);
         uploaderText   = findViewById(R.id.uploaderText);
         connectionText = findViewById(R.id.connectionText);
-        folderText     = findViewById(R.id.folderText);
-        folderRow      = findViewById(R.id.folderRow);
         menuPanel      = findViewById(R.id.menuPanel);
         settingsPanel  = findViewById(R.id.settingsPanel);
         infoCard       = findViewById(R.id.infoCard);
@@ -139,19 +132,6 @@ public class MainActivity extends Activity {
         divider.setVisibility(View.GONE);
         againPanel.setVisibility(View.GONE);
         clearBtn.setVisibility(View.GONE);
-
-        updateFolderLabel();
-    }
-
-    private void updateFolderLabel() {
-        if (selectedFolder.isEmpty()) {
-            folderText.setText("📁 Save to: Default (Downloads/Albo Downloader)");
-        } else {
-            // Show just the last folder name
-            String name = selectedFolder.replace("\\", "/");
-            int last = name.lastIndexOf("/");
-            folderText.setText("📁 Save to: " + (last >= 0 ? name.substring(last + 1) : name));
-        }
     }
 
     private void setupListeners() {
@@ -191,9 +171,6 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        // Folder picker
-        folderRow.setOnClickListener(v -> showFolderPicker());
-
         btnVideo.setOnClickListener(v     -> startDownload("video"));
         btnAudio.setOnClickListener(v     -> startDownload("mp3"));
         btnSubtitles.setOnClickListener(v -> startDownload("subtitles"));
@@ -219,42 +196,6 @@ public class MainActivity extends Activity {
                     prefs.edit().putString("server_url", url).apply();
                     checkConnection();
                 }
-            }
-        });
-    }
-
-    private void showFolderPicker() {
-        executor.execute(() -> {
-            try {
-                HttpURLConnection conn = openConn(serverUrl + "/folders", "GET", null);
-                String resp = readResp(conn);
-                conn.disconnect();
-                JSONObject json = new JSONObject(resp);
-
-                // Build ordered map
-                folderMap.clear();
-                folderMap.put("Default (Downloads/Albo Downloader)", "");
-                Iterator<String> keys = json.keys();
-                while (keys.hasNext()) {
-                    String key = keys.next();
-                    folderMap.put(key, json.getString(key));
-                }
-
-                handler.post(() -> {
-                    ArrayList<String> names = new ArrayList<>(folderMap.keySet());
-                    new AlertDialog.Builder(this)
-                        .setTitle("Save to folder")
-                        .setItems(names.toArray(new String[0]), (dialog, which) -> {
-                            String chosen = names.get(which);
-                            selectedFolder = folderMap.getOrDefault(chosen, "");
-                            prefs.edit().putString("save_folder", selectedFolder).apply();
-                            updateFolderLabel();
-                        })
-                        .show();
-                });
-
-            } catch (Exception e) {
-                handler.post(() -> toast("Could not load folders from PC"));
             }
         });
     }
@@ -365,8 +306,6 @@ public class MainActivity extends Activity {
                 JSONObject body = new JSONObject();
                 body.put("url", currentUrl);
                 body.put("format", fmt);
-                body.put("save_folder", selectedFolder);
-
                 HttpURLConnection conn = openConn(serverUrl + "/download", "POST", body.toString());
                 String resp = readResp(conn);
                 conn.disconnect();
@@ -402,10 +341,19 @@ public class MainActivity extends Activity {
                 });
 
                 if ("done".equals(status)) {
-                    int    count    = json.optInt("count", 1);
-                    double sizeMb   = json.optDouble("size_mb", 0);
-                    String folder   = json.optString("save_folder", "");
-                    handler.post(() -> onDownloadDone(count, sizeMb, folder));
+                    // Get list of ALL files (important for photos with multiple images)
+                    JSONArray filesArr = json.optJSONArray("files");
+                    List<String> files = new ArrayList<>();
+                    if (filesArr != null) {
+                        for (int i = 0; i < filesArr.length(); i++) {
+                            files.add(filesArr.getString(i));
+                        }
+                    } else {
+                        files.add(json.optString("main_file", ""));
+                    }
+                    int    count  = json.optInt("count", files.size());
+                    double sizeMb = json.optDouble("size_mb", 0);
+                    handler.post(() -> triggerAllDownloads(jobId, files, sizeMb, count));
                 } else if ("error".equals(status)) {
                     handler.post(() -> showError(json.optString("error", "Download failed")));
                 } else {
@@ -417,14 +365,56 @@ public class MainActivity extends Activity {
         }), 1000);
     }
 
-    private void onDownloadDone(int count, double sizeMb, String folder) {
-        String sizeStr  = sizeMb > 0 ? String.format(" • %.1f MB", sizeMb) : "";
-        String countStr = count > 1  ? count + " files" : "1 file";
-        String folderName = folder.isEmpty() ? "Downloads/Albo Downloader" :
-            folder.replace("\\", "/").replaceAll(".*[/\\\\]", "");
+    /**
+     * Queue ALL files (especially for photos) via Android DownloadManager.
+     * Each file saves to the phone's Downloads folder and triggers a gallery scan.
+     */
+    private void triggerAllDownloads(String jobId, List<String> files, double sizeMb, int count) {
+        DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        int queued = 0;
 
-        resetUI("✓ Saved " + countStr + sizeStr + "\n📁 " + folderName);
-        toast(count + " file(s) saved to " + folderName);
+        for (String filename : files) {
+            if (filename.isEmpty()) continue;
+            try {
+                String fileUrl = serverUrl + "/file/" + jobId + "/" + Uri.encode(filename);
+                DownloadManager.Request req = new DownloadManager.Request(Uri.parse(fileUrl));
+                req.setTitle(filename);
+                req.setDescription("Albo Downloader");
+                req.setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+
+                // Determine correct subfolder: images to Pictures, audio to Music, else Downloads
+                String lower = filename.toLowerCase();
+                if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+                    lower.endsWith(".png") || lower.endsWith(".webp") ||
+                    lower.endsWith(".gif")) {
+                    req.setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, filename);
+                    req.allowScanningByMediaScanner();
+                } else if (lower.endsWith(".mp3") || lower.endsWith(".m4a") ||
+                           lower.endsWith(".flac") || lower.endsWith(".ogg")) {
+                    req.setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, filename);
+                    req.allowScanningByMediaScanner();
+                } else if (lower.endsWith(".mp4") || lower.endsWith(".mkv") ||
+                           lower.endsWith(".webm") || lower.endsWith(".avi")) {
+                    req.setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, filename);
+                    req.allowScanningByMediaScanner();
+                } else {
+                    req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+                }
+
+                if (dm != null) {
+                    dm.enqueue(req);
+                    queued++;
+                }
+            } catch (Exception e) {
+                log("Download queue error: " + e.getMessage());
+            }
+        }
+
+        String sizeStr  = sizeMb > 0 ? String.format(" • %.1f MB", sizeMb) : "";
+        String countStr = queued > 1 ? queued + " files" : "1 file";
+        resetUI("✓ Saving " + countStr + sizeStr + " to phone");
+        toast(queued + " file(s) downloading — check notifications");
     }
 
     private void resetUI(String message) {
@@ -454,6 +444,10 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void log(String msg) {
+        android.util.Log.d("AlboDownloader", msg);
+    }
+
     private String fmtDur(int secs) {
         int m = secs / 60, s = secs % 60;
         return m >= 60 ? String.format("%dh %02dm", m / 60, m % 60)
@@ -468,7 +462,7 @@ public class MainActivity extends Activity {
         HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
         conn.setRequestMethod(method);
         conn.setConnectTimeout(10000);
-        conn.setReadTimeout(30000);
+        conn.setReadTimeout(60000);
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json");
