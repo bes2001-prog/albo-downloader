@@ -330,6 +330,25 @@ public class MainActivity extends Activity {
                 conn.disconnect();
                 JSONObject json = new JSONObject(resp);
 
+                // Stop polling if job not found (stale job ID from previous session)
+                if (json.has("error")) {
+                    String errMsg = json.optString("error", "");
+                    if (errMsg.contains("not found") || errMsg.contains("Not Found")) {
+                        // Stale job — stop silently, don't show error to user
+                        handler.post(() -> {
+                            if (isDownloading) {
+                                isDownloading = false;
+                                progressBar.setVisibility(android.view.View.GONE);
+                                setButtonsEnabled(true);
+                                currentJobId = null;
+                            }
+                        });
+                        return;
+                    }
+                    handler.post(() -> showError(errMsg));
+                    return;
+                }
+
                 String status   = json.optString("status", "");
                 int    progress = json.optInt("progress", 0);
                 String platform = json.optString("platform", "");
@@ -419,6 +438,7 @@ public class MainActivity extends Activity {
 
     private void resetUI(String message) {
         isDownloading = false;
+        currentJobId  = null;
         progressBar.setVisibility(View.GONE);
         statusText.setText(message);
         statusText.setTextColor(0xFF4CAF50);
