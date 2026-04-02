@@ -62,7 +62,7 @@ def get_platform(url):
 
 SUBTITLE_PLATFORMS = {"YouTube", "Vimeo", "Twitch", "Dailymotion"}
 TEXTONLY_PLATFORMS = {"YouTube"}
-PHOTOS_PLATFORMS   = {"Instagram", "TikTok", "Pinterest", "Twitter/X", "Threads"}
+PHOTOS_PLATFORMS   = {"Instagram", "TikTok", "Pinterest", "Twitter/X", "Threads", "Facebook"}
 
 
 def run_download(job_id, url, fmt):
