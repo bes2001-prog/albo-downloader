@@ -3,7 +3,9 @@
 Albo Downloader API Server
 ===========================
 Downloads files on the PC, serves them to the Android app.
-App saves to phone Downloads/Gallery.
+App saves to phone Downloads/Pictures/Music/Movies.
+Formats: video, mp3, subtitles, textonly, playlist, photos
+Photos saved as JPG with proper names. Facebook photos supported.
 """
 
 import os, re, uuid, threading, subprocess, shutil, json as _json
@@ -44,11 +46,16 @@ def get_cookie_args():
 def clean_ansi(text):
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
+def safe_filename(name, max_len=60):
+    name = re.sub(r'[<>:"/\\\\|?*]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name[:max_len] if name else "download"
+
 def get_platform(url):
     u = url.lower()
     if "tiktok.com" in u:      return "TikTok"
     if "instagram.com" in u:   return "Instagram"
-    if "facebook.com" in u or "fb.watch" in u: return "Facebook"
+    if "facebook.com" in u or "fb.watch" in u or "fb.com" in u: return "Facebook"
     if "youtube.com" in u or "youtu.be" in u:  return "YouTube"
     if "twitter.com" in u or "x.com" in u:     return "Twitter/X"
     if "reddit.com" in u:      return "Reddit"
@@ -65,6 +72,38 @@ TEXTONLY_PLATFORMS = {"YouTube"}
 PHOTOS_PLATFORMS   = {"Instagram", "TikTok", "Pinterest", "Twitter/X", "Threads", "Facebook"}
 
 
+def convert_and_rename_photos(folder, base_name):
+    """Convert webp to jpg and rename to base_name_001.jpg etc."""
+    try:
+        from PIL import Image
+        use_pillow = True
+    except ImportError:
+        use_pillow = False
+
+    img_exts = {".webp", ".jpg", ".jpeg", ".png", ".gif"}
+    files = sorted([f for f in Path(folder).glob("*")
+                    if f.suffix.lower() in img_exts])
+
+    renamed = []
+    for i, f in enumerate(files, 1):
+        new_name = f"{base_name}_{i:03d}.jpg"
+        new_path = Path(folder) / new_name
+        try:
+            if use_pillow:
+                img = Image.open(str(f)).convert("RGB")
+                img.save(str(new_path), "JPEG", quality=95)
+                if f != new_path:
+                    f.unlink()
+            else:
+                f.rename(new_path)
+            renamed.append(new_path)
+            log("🖼️", f"Saved as {new_name}")
+        except Exception as e:
+            log("⚠️", f"Could not rename {f.name}: {e}")
+            renamed.append(f)
+    return renamed
+
+
 def run_download(job_id, url, fmt):
     ytdlp    = get_ytdlp()
     out_path = DOWNLOAD_DIR / job_id
@@ -77,7 +116,7 @@ def run_download(job_id, url, fmt):
     log("⬇️", f"[{job_id}] {platform} | {fmt} | {url[:60]}...")
 
     try:
-        # ── Photos — gallery-dl, flat output into job folder ─────────────────
+        # Photos - gallery-dl then rename properly
         if fmt == "photos":
             gdl = get_gallery_dl()
             if not gdl:
@@ -86,15 +125,28 @@ def run_download(job_id, url, fmt):
                         "error": "gallery-dl not installed. Run: pip install gallery-dl"})
                 return
 
-            cmd = [
-                gdl,
-                *get_cookie_args(),
-                "--dest",      str(out_path),
-                "--no-part",
-                "--no-mtime",
-                "-o", "{num:>04}.{extension}",  # flat numbered: 0001.jpg, 0002.jpg
-                url
-            ]
+            # Get uploader/title info for naming
+            base_name = platform.lower()
+            try:
+                info_result = subprocess.run(
+                    [get_ytdlp(), *get_cookie_args(), "--dump-json", "--no-playlist", url],
+                    capture_output=True, text=True, timeout=15,
+                    encoding="utf-8", errors="replace")
+                if info_result.returncode == 0 and info_result.stdout.strip():
+                    info = _json.loads(info_result.stdout.split("\n")[0])
+                    uploader = info.get("uploader") or info.get("channel") or ""
+                    title    = info.get("title") or ""
+                    if uploader and title:
+                        base_name = safe_filename(f"{uploader} - {title}")
+                    elif uploader:
+                        base_name = safe_filename(uploader)
+                    elif title:
+                        base_name = safe_filename(title)
+            except Exception:
+                pass
+
+            cmd = [gdl, *get_cookie_args(), "--dest", str(out_path),
+                   "--no-part", "--no-mtime", url]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", errors="replace")
             count = 0
@@ -102,25 +154,29 @@ def run_download(job_id, url, fmt):
                 line = clean_ansi(line).strip()
                 if line:
                     log("📷", line)
-                    if "#" in line or "Downloading" in line.lower():
+                    if "#" in line or "downloading" in line.lower():
                         count += 1
                         with jobs_lock:
-                            jobs[job_id]["progress"] = min(count * 5, 95)
+                            jobs[job_id]["progress"] = min(count * 5, 90)
             proc.wait()
 
-            # gallery-dl may create subfolders — flatten everything into out_path
+            # Flatten subfolders
             for f in list(out_path.rglob("*")):
                 if f.is_file() and f.parent != out_path:
                     dest = out_path / f.name
                     if not dest.exists():
                         shutil.move(str(f), str(dest))
-            # Remove empty subdirs
             for d in sorted(out_path.rglob("*"), reverse=True):
                 if d.is_dir():
                     try: d.rmdir()
                     except: pass
 
-        # ── Text Only — transcript, strip timestamps ──────────────────────────
+            # Convert webp to jpg and rename
+            convert_and_rename_photos(out_path, base_name)
+            with jobs_lock:
+                jobs[job_id]["progress"] = 100
+
+        # Text Only - transcript no timestamps
         elif fmt == "textonly":
             cmd = [ytdlp, *get_cookie_args(), url, "--no-playlist",
                    "--skip-download", "--write-subs", "--write-auto-subs",
@@ -131,7 +187,6 @@ def run_download(job_id, url, fmt):
                                     text=True, encoding="utf-8", errors="replace")
             proc.communicate()
             proc.wait()
-            # Strip timestamps
             for srt_file in out_path.glob("*.srt"):
                 txt_path = srt_file.with_suffix(".txt")
                 try:
@@ -139,15 +194,17 @@ def run_download(job_id, url, fmt):
                     out_lines = []
                     for line in lines:
                         line = line.strip()
-                        if not line or line.isdigit() or "-->" in line: continue
+                        if not line or line.isdigit() or "-->" in line:
+                            continue
                         line = re.sub(r'<[^>]+>', '', line)
-                        if line: out_lines.append(line)
+                        if line:
+                            out_lines.append(line)
                     txt_path.write_text("\n".join(out_lines), encoding="utf-8")
                     srt_file.unlink()
                 except Exception as e:
                     log("⚠️", f"Strip timestamps: {e}")
 
-        # ── Subtitles — SRT with timestamps ───────────────────────────────────
+        # Subtitles - SRT with timestamps
         elif fmt == "subtitles":
             cmd = [ytdlp, *get_cookie_args(), url, "--no-playlist",
                    "--skip-download", "--write-subs", "--write-auto-subs",
@@ -159,7 +216,7 @@ def run_download(job_id, url, fmt):
             proc.communicate()
             proc.wait()
 
-        # ── MP3 ───────────────────────────────────────────────────────────────
+        # MP3 - highest quality
         elif fmt == "mp3":
             cmd = [ytdlp, *get_cookie_args(), url, "--no-playlist",
                    "-x", "--audio-format", "mp3", "--audio-quality", "0",
@@ -174,10 +231,11 @@ def run_download(job_id, url, fmt):
             for line in proc.stdout:
                 m = re.search(r'(\d+\.?\d*)%', clean_ansi(line))
                 if m:
-                    with jobs_lock: jobs[job_id]["progress"] = int(float(m.group(1)))
+                    with jobs_lock:
+                        jobs[job_id]["progress"] = int(float(m.group(1)))
             proc.wait()
 
-        # ── Playlist ──────────────────────────────────────────────────────────
+        # Playlist
         elif fmt == "playlist":
             cmd = [ytdlp, *get_cookie_args(), url,
                    "--yes-playlist", "--playlist-end", "150",
@@ -191,10 +249,11 @@ def run_download(job_id, url, fmt):
             for line in proc.stdout:
                 m = re.search(r'(\d+\.?\d*)%', clean_ansi(line))
                 if m:
-                    with jobs_lock: jobs[job_id]["progress"] = int(float(m.group(1)))
+                    with jobs_lock:
+                        jobs[job_id]["progress"] = int(float(m.group(1)))
             proc.wait()
 
-        # ── Video (best quality) ───────────────────────────────────────────────
+        # Video - best quality
         else:
             cmd = [ytdlp, *get_cookie_args(), url, "--no-playlist",
                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
@@ -207,10 +266,11 @@ def run_download(job_id, url, fmt):
             for line in proc.stdout:
                 m = re.search(r'(\d+\.?\d*)%', clean_ansi(line))
                 if m:
-                    with jobs_lock: jobs[job_id]["progress"] = int(float(m.group(1)))
+                    with jobs_lock:
+                        jobs[job_id]["progress"] = int(float(m.group(1)))
             proc.wait()
 
-        # ── Collect files ─────────────────────────────────────────────────────
+        # Collect files
         skip = {".part", ".ytdl", ".json"}
         media_files = [f for f in out_path.glob("*")
                        if f.is_file() and f.suffix.lower() not in skip]
@@ -218,10 +278,9 @@ def run_download(job_id, url, fmt):
         if not media_files:
             with jobs_lock:
                 jobs[job_id].update({"status": "error",
-                    "error": "No file downloaded — check the URL"})
+                    "error": "No file downloaded - check the URL"})
             return
 
-        # Main file = largest non-sub file
         if fmt in ("subtitles", "textonly"):
             main_file = media_files[0]
         else:
@@ -243,7 +302,7 @@ def run_download(job_id, url, fmt):
                 "out_path":  str(out_path),
             })
 
-        log("✅", f"[{job_id}] {len(media_files)} file(s) ready — {main_file.name}")
+        log("✅", f"[{job_id}] {len(media_files)} file(s) ready - {main_file.name}")
 
     except Exception as e:
         shutil.rmtree(str(out_path), ignore_errors=True)
@@ -252,11 +311,10 @@ def run_download(job_id, url, fmt):
         log("❌", f"[{job_id}] Exception: {e}")
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok", "service": "Albo Downloader", "port": PORT})
+
 
 @app.route("/info", methods=["POST"])
 def get_info():
@@ -286,6 +344,7 @@ def get_info():
         "show_playlist":  "list=" in url and ("youtube.com" in url or "youtu.be" in url),
     })
 
+
 @app.route("/download", methods=["POST"])
 def start_download():
     data  = request.json or {}
@@ -297,8 +356,9 @@ def start_download():
     with jobs_lock:
         jobs[job_id] = {"status": "queued", "progress": 0, "url": url, "format": fmt}
     threading.Thread(target=run_download, args=(job_id, url, fmt), daemon=True).start()
-    log("📥", f"[{job_id}] Queued {fmt} — {url[:60]}")
+    log("📥", f"[{job_id}] Queued {fmt} - {url[:60]}")
     return jsonify({"job_id": job_id})
+
 
 @app.route("/status/<job_id>")
 def job_status(job_id):
@@ -308,20 +368,17 @@ def job_status(job_id):
         return jsonify({"error": "Job not found"}), 404
     return jsonify(job)
 
+
 @app.route("/file/<job_id>/<path:filename>")
 def get_file(job_id, filename):
-    """Stream a single file to the phone then clean up when all files fetched."""
     with jobs_lock:
         job = jobs.get(job_id)
     if not job or job.get("status") != "done":
         return jsonify({"error": "File not ready"}), 404
-
     file_path = Path(job["out_path"]) / filename
     if not file_path.exists():
         return jsonify({"error": "File not found"}), 404
 
-    # Track how many files have been fetched
-    # Clean up only after all files are sent
     total = job.get("count", 1)
 
     @after_this_request
@@ -343,15 +400,25 @@ def get_file(job_id, filename):
     return send_file(str(file_path), as_attachment=True,
                      download_name=Path(filename).name)
 
+
 @app.route("/jobs")
 def list_jobs():
-    with jobs_lock: return jsonify(dict(jobs))
+    with jobs_lock:
+        return jsonify(dict(jobs))
+
 
 if __name__ == "__main__":
     import sys
     if sys.platform == "win32":
         os.system("")
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    try:
+        from PIL import Image
+        pil_status = "✅ Found (webp→jpg conversion active)"
+    except ImportError:
+        pil_status = "⚠️  Not installed - will rename webp to jpg (pip install Pillow)"
+
     print("\n" + "=" * 56)
     print("  🎬  Albo Downloader Server")
     print(f"  Running on    : http://0.0.0.0:{PORT}")
@@ -360,5 +427,7 @@ if __name__ == "__main__":
     print(f"  yt-dlp        : {get_ytdlp()}")
     gdl = get_gallery_dl()
     print(f"  gallery-dl    : {gdl if gdl else '❌ Not installed (pip install gallery-dl)'}")
+    print(f"  Pillow        : {pil_status}")
     print("=" * 56 + "\n")
+
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
